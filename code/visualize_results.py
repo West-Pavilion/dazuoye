@@ -10,8 +10,29 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import numpy as np
 from PIL import Image
+
+CLASS_NAME_TRANSLATIONS = {
+    "Bacterial_leaf_blight": "白叶枯病",
+    "Bacterial_leaf_streak": "细菌性条斑病",
+    "healthy": "健康叶片",
+    "Leaf_roller": "稻纵卷叶螟",
+}
+
+CHINESE_FONT_CANDIDATES = [
+    "Noto Sans CJK SC",
+    "Noto Sans CJK JP",
+    "Noto Sans SC",
+    "Source Han Sans CN",
+    "WenQuanYi Zen Hei",
+    "WenQuanYi Micro Hei",
+    "SimHei",
+    "Microsoft YaHei",
+    "PingFang SC",
+    "Arial Unicode MS",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,7 +46,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-dir", type=str, default="", help="Directory used to save generated figures.")
     parser.add_argument("--max-gallery", type=int, default=8, help="Maximum number of images per gallery.")
     parser.add_argument("--dpi", type=int, default=220, help="Figure DPI.")
+    parser.add_argument("--font-path", type=str, default="", help="Optional path to a Chinese font file.")
     return parser.parse_args()
+
+
+def setup_matplotlib(font_path: str) -> str:
+    selected_font = ""
+
+    if font_path:
+        custom_font_path = Path(font_path).expanduser().resolve()
+        if not custom_font_path.exists():
+            raise FileNotFoundError(f"指定的字体文件不存在: {custom_font_path}")
+        font_manager.fontManager.addfont(str(custom_font_path))
+        selected_font = font_manager.FontProperties(fname=str(custom_font_path)).get_name()
+    else:
+        available_fonts = {font.name for font in font_manager.fontManager.ttflist}
+        for font_name in CHINESE_FONT_CANDIDATES:
+            if font_name in available_fonts:
+                selected_font = font_name
+                break
+
+    if selected_font:
+        plt.rcParams["font.sans-serif"] = [selected_font, "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+    return selected_font
+
+
+def localize_class_name(name: str) -> str:
+    return CLASS_NAME_TRANSLATIONS.get(name, name.replace("_", " "))
+
+
+def localize_class_names(names: Sequence[str]) -> List[str]:
+    return [localize_class_name(name) for name in names]
 
 
 def load_history(csv_path: Path) -> List[Dict[str, float]]:
@@ -108,30 +160,30 @@ def save_training_curves(history: Sequence[Dict[str, float]], save_path: Path, d
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
-    axes[0].plot(epochs, train_loss, marker="o", linewidth=2.2, color="#d1495b", label="Train Loss")
-    axes[0].plot(epochs, val_loss, marker="s", linewidth=2.2, color="#2e4057", label="Val Loss")
-    axes[0].set_title("Loss Curve")
-    axes[0].set_xlabel("Epoch")
-    axes[0].set_ylabel("Loss")
+    axes[0].plot(epochs, train_loss, marker="o", linewidth=2.2, color="#d1495b", label="训练损失")
+    axes[0].plot(epochs, val_loss, marker="s", linewidth=2.2, color="#2e4057", label="验证损失")
+    axes[0].set_title("损失曲线")
+    axes[0].set_xlabel("训练轮次")
+    axes[0].set_ylabel("损失值")
     axes[0].grid(alpha=0.25)
     axes[0].legend()
 
-    axes[1].plot(epochs, train_acc, marker="o", linewidth=2.2, color="#00798c", label="Train Acc")
-    axes[1].plot(epochs, val_acc, marker="s", linewidth=2.2, color="#edae49", label="Val Acc")
-    axes[1].set_title("Accuracy Curve")
-    axes[1].set_xlabel("Epoch")
-    axes[1].set_ylabel("Accuracy")
+    axes[1].plot(epochs, train_acc, marker="o", linewidth=2.2, color="#00798c", label="训练准确率")
+    axes[1].plot(epochs, val_acc, marker="s", linewidth=2.2, color="#edae49", label="验证准确率")
+    axes[1].set_title("准确率曲线")
+    axes[1].set_xlabel("训练轮次")
+    axes[1].set_ylabel("准确率")
     axes[1].set_ylim(0.0, 1.02)
     axes[1].grid(alpha=0.25)
     axes[1].legend()
 
     axes[2].plot(epochs, learning_rate, marker="o", linewidth=2.2, color="#4f772d")
-    axes[2].set_title("Learning Rate Schedule")
-    axes[2].set_xlabel("Epoch")
-    axes[2].set_ylabel("LR")
+    axes[2].set_title("学习率变化")
+    axes[2].set_xlabel("训练轮次")
+    axes[2].set_ylabel("学习率")
     axes[2].grid(alpha=0.25)
 
-    fig.suptitle("Training Process Overview", fontsize=16, y=1.02)
+    fig.suptitle("模型训练过程总览", fontsize=16, y=1.02)
     fig.tight_layout()
     fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
@@ -145,17 +197,19 @@ def save_confusion_heatmap(class_names: Sequence[str], confusion: np.ndarray, sa
     row_sums = confusion.sum(axis=1, keepdims=True)
     normalized = np.divide(confusion, row_sums, out=np.zeros_like(confusion, dtype=float), where=row_sums != 0)
 
+    display_names = localize_class_names(class_names)
+
     fig, ax = plt.subplots(figsize=(8.5, 7))
     image = ax.imshow(normalized, cmap="YlOrRd", vmin=0.0, vmax=1.0)
-    plt.colorbar(image, ax=ax, fraction=0.046, pad=0.04, label="Normalized Ratio")
+    plt.colorbar(image, ax=ax, fraction=0.046, pad=0.04, label="归一化比例")
 
-    ax.set_xticks(np.arange(len(class_names)))
-    ax.set_yticks(np.arange(len(class_names)))
-    ax.set_xticklabels(class_names, rotation=25, ha="right")
-    ax.set_yticklabels(class_names)
-    ax.set_xlabel("Predicted Label")
-    ax.set_ylabel("True Label")
-    ax.set_title("Confusion Matrix")
+    ax.set_xticks(np.arange(len(display_names)))
+    ax.set_yticks(np.arange(len(display_names)))
+    ax.set_xticklabels(display_names, rotation=25, ha="right")
+    ax.set_yticklabels(display_names)
+    ax.set_xlabel("预测类别")
+    ax.set_ylabel("真实类别")
+    ax.set_title("混淆矩阵")
 
     threshold = normalized.max() * 0.6 if normalized.size else 0.0
     for row in range(confusion.shape[0]):
@@ -183,15 +237,15 @@ def save_class_accuracy_chart(report: Dict[str, object], save_path: Path, dpi: i
     if not per_class:
         return False
 
-    class_names = [item["class_name"] for item in per_class]
+    class_names = localize_class_names([item["class_name"] for item in per_class])
     accuracies = [float(item["accuracy"]) for item in per_class]
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
     colors = plt.cm.Spectral(np.linspace(0.12, 0.88, len(class_names)))
     bars = ax.bar(class_names, accuracies, color=colors)
     ax.set_ylim(0.0, 1.05)
-    ax.set_ylabel("Accuracy")
-    ax.set_title("Per-Class Accuracy")
+    ax.set_ylabel("准确率")
+    ax.set_title("各类别准确率")
     ax.grid(axis="y", alpha=0.25)
 
     for bar, value in zip(bars, accuracies):
@@ -215,15 +269,16 @@ def save_split_distribution(split_meta: Dict[str, object], save_path: Path, dpi:
     if not classes:
         return False
 
-    class_names = list(classes.keys())
-    train_counts = [int(classes[name]["train"]) for name in class_names]
-    val_counts = [int(classes[name]["val"]) for name in class_names]
+    raw_class_names = list(classes.keys())
+    class_names = localize_class_names(raw_class_names)
+    train_counts = [int(classes[name]["train"]) for name in raw_class_names]
+    val_counts = [int(classes[name]["val"]) for name in raw_class_names]
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
-    ax.bar(class_names, train_counts, color="#386641", label="Train")
-    ax.bar(class_names, val_counts, bottom=train_counts, color="#bc4749", label="Val")
-    ax.set_title("Dataset Split Distribution")
-    ax.set_ylabel("Number of Images")
+    ax.bar(class_names, train_counts, color="#386641", label="训练集")
+    ax.bar(class_names, val_counts, bottom=train_counts, color="#bc4749", label="验证集")
+    ax.set_title("数据集划分分布")
+    ax.set_ylabel("图像数量")
     ax.grid(axis="y", alpha=0.25)
     ax.legend()
 
@@ -291,12 +346,16 @@ def save_prediction_gallery(
         axis.axis("off")
         title_color = "#1b4332" if item["correct"] else "#9d0208"
         axis.set_title(
-            f"T: {item['true_label']}\nP: {item['pred_label']}\nConf: {float(item['confidence']):.3f}",
+            "真实: {}\n预测: {}\n置信度: {:.3f}".format(
+                localize_class_name(str(item["true_label"])),
+                localize_class_name(str(item["pred_label"])),
+                float(item["confidence"]),
+            ),
             fontsize=10,
             color=title_color,
         )
 
-    title = "Misclassified Samples" if errors_only else "Representative Correct Predictions"
+    title = "错误预测样例" if errors_only else "正确预测样例"
     fig.suptitle(title, fontsize=16, y=1.02)
     fig.tight_layout()
     fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
@@ -310,6 +369,7 @@ def main() -> None:
     eval_dir = Path(args.eval_dir).expanduser().resolve()
     save_dir = Path(args.save_dir).expanduser().resolve() if args.save_dir else work_dir / "figures"
     save_dir.mkdir(parents=True, exist_ok=True)
+    selected_font = setup_matplotlib(args.font_path)
 
     history = load_history(work_dir / "history.csv")
     report = load_report(eval_dir / "report.json")
@@ -337,7 +397,12 @@ def main() -> None:
             "and predictions.csv exist in the expected directories."
         )
 
-    print("Generated figures:")
+    if selected_font:
+        print(f"已使用中文字体: {selected_font}")
+    else:
+        print("未检测到可用中文字体，若图中出现方框，请通过 --font-path 指定中文字体文件。")
+
+    print("已生成图片:")
     for path in generated:
         print(f"  {path}")
 
