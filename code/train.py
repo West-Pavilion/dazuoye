@@ -10,7 +10,6 @@ from typing import Dict, Tuple
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
@@ -21,6 +20,32 @@ try:
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:  # pragma: no cover
     SummaryWriter = None
+
+try:
+    from torch.amp import GradScaler as TorchGradScaler
+    from torch.amp import autocast as torch_autocast
+
+    def build_grad_scaler(device_type: str, enabled: bool) -> TorchGradScaler:
+        try:
+            return TorchGradScaler(device_type, enabled=enabled)
+        except TypeError:
+            return TorchGradScaler(enabled=enabled)
+
+    def amp_autocast(device_type: str, enabled: bool):
+        try:
+            return torch_autocast(device_type=device_type, enabled=enabled)
+        except TypeError:
+            return torch_autocast(enabled=enabled)
+
+except ImportError:  # pragma: no cover
+    from torch.cuda.amp import GradScaler as TorchGradScaler
+    from torch.cuda.amp import autocast as torch_autocast
+
+    def build_grad_scaler(device_type: str, enabled: bool) -> TorchGradScaler:
+        return TorchGradScaler(enabled=enabled)
+
+    def amp_autocast(device_type: str, enabled: bool):
+        return torch_autocast(enabled=enabled)
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -420,7 +445,7 @@ def run_train_epoch(
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    scaler: GradScaler,
+    scaler: TorchGradScaler,
     amp_enabled: bool,
 ) -> Tuple[float, float]:
     model.train()
@@ -434,7 +459,7 @@ def run_train_epoch(
         labels = labels.to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
-        with autocast(enabled=amp_enabled):
+        with amp_autocast(device.type, enabled=amp_enabled):
             outputs = model(images)
             loss = criterion(outputs, labels)
 
@@ -536,7 +561,7 @@ def main() -> None:
     optimizer = AdamW(trainable_params, lr=args.lr, weight_decay=args.weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=max(args.epochs, 1))
     criterion = nn.CrossEntropyLoss()
-    scaler = GradScaler(enabled=amp_enabled)
+    scaler = build_grad_scaler(device.type, enabled=amp_enabled)
 
     start_epoch = 0
     best_acc = 0.0
